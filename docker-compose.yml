@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # 1. DATABASE: Redis stores credentials, locks, and task states
+  redis:
+    image: redis:7-alpine
+    container_name: pushkin_redis
+    command: redis-server --save 60 1 --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./redis_data:/data
+    restart: always
+
+  # 2. GUI: Visual management for Redis (Debug & Monitoring)
+  redis-insight:
+    image: redis/redisinsight:latest
+    container_name: pushkin_ui_debug
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+    restart: always
+
+  # 3. API: FastAPI handles incoming JSON requests and Dashboard
+  api:
+    build: .
+    container_name: pushkin_api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+    volumes:
+      - ./app:/app
+    restart: always
+
+  # 4. WORKER: The "Firing" engine. Scale this for more speed!
+  worker:
+    build: .
+    # We use the same image but a different start command
+    command: rq worker --url redis://redis:6379
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+    depends_on:
+      - redis
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 256M
+    volumes:
+      - ./app:/app
+      - ./backups:/app/backups
+    # network_mode: "host" # Uncomment if targeting local devices directly
+    restart: always
+
+volumes:
+  redis_data:
+  backups:
+

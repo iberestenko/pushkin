@@ -1,0 +1,20 @@
+# Web Framework & Server
+fastapi==0.104.1
+uvicorn==0.24.0
+
+# Task Queue & Broker
+redis==5.0.1
+rq==1.15.1
+
+# Network & SSH
+paramiko==3.3.1
+cryptography==41.0.5
+
+# Templating & Data Validation
+jinja2==3.1.2
+pydantic==2.5.2
+
+# Notifications & API Tools
+requests==2.31.0
+python-dotenv==1.0.0
+

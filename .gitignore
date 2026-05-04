@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+redis_data/
+backups/
+auth_keys/
+.DS_Store
