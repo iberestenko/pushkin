@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pushkin NetOps | Dashboard</title>
-    <script src="https://tailwindcss.com"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes pulse-blue { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
         .animate-pulse-blue { animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
@@ -40,7 +40,7 @@
                         </div>
                         <div>
                             <label class="block text-xs font-bold text-gray-500 mb-1 uppercase">Abstract Action</label>
-                            <select id="action-select" class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition">
+                            <select id="action-select" onchange="updateParamsHint()" class="w-full bg-gray-900 border border-gray-700 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition">
                                 <option value="create_vlan">Create VLAN</option>
                                 <option value="delete_vlan">Delete VLAN</option>
                                 <option value="tag_port">Tag Trunk Port</option>
@@ -168,6 +168,25 @@
         // Initial Load & Auto-Refresh
         refreshDashboard();
         setInterval(refreshDashboard, 15000);
+
+	const actionDefaults = {
+	    "create_vlan": { "vlan_id": 100, "vlan_name": "PROD_NET" },
+	    "delete_vlan": { "vlan_id": 100 },
+	    "tag_port": { "port": "Gi0/24", "vlan_id": 100 },
+	    "untag_port": { "port": "Gi0/1", "vlan_id": 100 }
+	};
+
+	function updateParamsHint() {
+	    const action = document.getElementById('action-select').value;
+	    const paramsField = document.getElementById('params-json');
+	    
+	    // Берем дефолтные параметры из словаря и форматируем их в красивый JSON
+	    if (actionDefaults[action]) {
+		paramsField.value = JSON.stringify(actionDefaults[action], null, 4);
+	    }
+	}
+
+	updateParamsHint();
     </script>
 </body>
 </html>
