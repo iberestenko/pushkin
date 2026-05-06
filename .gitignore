@@ -6,3 +6,4 @@ redis_data/
 backups/
 auth_keys/
 .DS_Store
+.swp

@@ -1,160 +1,134 @@
-import paramiko
-import select
+import asyncio
+import asyncssh
 import time
 import json
-import os
-import socket
-from datetime import datetime
-from redis import Redis
-from rq import get_current_job
 
-# Initialize Redis connection
-redis_conn = Redis(host=os.getenv('REDIS_HOST', 'redis'), port=6379, decode_responses=False)
-
-# --- CUSTOM EXCEPTIONS ---
-class DeviceLockedError(Exception):
-    """Raised when a device is already being configured by another worker."""
-    pass
-
-class NetworkUnreachableError(Exception):
-    """Raised for connection timeouts or SSH drops."""
-    pass
-
-# --- UTILS ---
-def send_telegram_alert(message):
-    """Helper to send alerts to the NOC Telegram channel."""
-    token = os.getenv("TG_TOKEN")
-    chat_id = os.getenv("TG_CHAT_ID")
-    if not token or not chat_id:
-        return
-    import requests
-    url = f"https://telegram.org{token}/sendMessage"
-    try:
-        requests.post(url, json={"chat_id": chat_id, "text": f"🚀 *Pushkin Alert*\n{message}", "parse_mode": "Markdown"}, timeout=5)
-    except Exception as e:
-        print(f"Telegram error: {e}")
-
-def save_config(ip, config_text, prefix="POST"):
-    """Saves the configuration to the backups folder."""
-    os.makedirs(f"backups/{ip}", exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"backups/{ip}/{prefix}_{timestamp}.txt"
-    with open(filename, "w") as f:
-        f.write(config_text)
-    return filename
-
-# --- MAIN TASK ---
-def pushkin_fire(device_ip, commands, chunk_size=8192, read_timeout=0.1, send_notify=False, make_backup=False, pre_backup=False):
-    """
-    Core engine: Fires a burst of commands into the SSH channel.
-    """
-    job = get_current_job()
-    lock_key = f"lock:device:{device_ip}"
-
-    # 1. ATOMIC LOCK: Prevent multiple workers from hitting the same IP
-    if not redis_conn.set(lock_key, "busy", nx=True, ex=60):
-        print(f"--- [LOCK] {device_ip} is busy. Retrying later...")
-        raise DeviceLockedError(f"Target {device_ip} is locked")
-
-    # 2. FETCH CREDENTIALS
-    info_raw = redis_conn.hgetall(f"device:info:{device_ip}")
-    if not info_raw:
-        redis_conn.delete(lock_key)
-        return {"status": "error", "reason": "No credentials in Redis"}
+class PushkinAsyncEngine:
+    # Список стоп-слов для "предохранителя"
+    STOP_WORDS = [
+        "invalid input", "error:", "syntax error", 
+        "incomplete command", "ambiguous command", "access denied"
+    ]
     
-    info = {k.decode(): v.decode() for k, v in info_raw.items()}
-    ssh_port = int(info.get('port', 22))
+    # Команды для экстренного прерывания и отката
+    ROLLBACK_COMMANDS = ["\x03", "rollback", "undo", "exit"]
 
-    client = paramiko.SSHClient()
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    def __init__(self, max_concurrent=500, redis_instance=None):
+        # Семафор ограничивает количество ОДНОВРЕМЕННЫХ SSH-сессий
+        self.semaphore = asyncio.Semaphore(max_concurrent)
+        self.redis = redis_instance
 
-    try:
-        # 3. CONNECT
-        client.connect(
-            hostname=device_ip,
-            port=ssh_port,
-            username=info['username'],
-            password=info['password'],
-            timeout=10,
-            look_for_keys=False
-        )
+    async def run_pushkin_task(self, device_cfg, job_id, quiet_period=2.0):
+        """
+        Индивидуальная корутина для одного устройства.
+        """
+        host = device_cfg['ip']
+        port = device_cfg.get('port', 22)
+        user = device_cfg['user']
+        password = device_cfg['pw']
+        commands = device_cfg['cmds']
         
-        chan = client.invoke_shell()
-        chan.setblocking(0)  # Non-blocking mode for select.select()
-
-        # 4. PRE-FIRE BACKUP (Optional)
-        if pre_backup:
-            chan.send("terminal length 0\nshow running-config\n")
-            # Wait for data using select
-            pre_config = ""
-            while True:
-                r, _, _ = select.select([chan], [], [], 0.5)
-                if r:
-                    data = chan.recv(65535).decode('utf-8', errors='ignore')
-                    if not data: break
-                    pre_config += data
-                else: break
-            save_config(device_ip, pre_config, prefix="PRE")
-
-        # 5. HIGH-SPEED BURST (The "Pushkin" Way)
-        payload = "\n".join(commands) + "\n"
-        payload_bytes = payload.encode('utf-8')
+        device_id = f"{host}:{port}"
+        channel_name = f"pushkin:stream:{job_id}:{host}:{port}"
         
-        offset = 0
-        while offset < len(payload_bytes):
-            # Check if socket is ready to write
-            _, writable, _ = select.select([], [chan], [], 5.0)
-            if writable:
-                sent = chan.send(payload_bytes[offset:offset+chunk_size])
-                offset += sent
-            else:
-                raise NetworkUnreachableError("Write timeout - device not accepting data")
+        async with self.semaphore:
+            start_time = time.time()
+            full_log = []
+            failed_command = None
+            error_detected = False
+            
+            try:
+                # 1. Подключение
+                async with asyncssh.connect(
+                    host, port=port, username=user, password=password, 
+                    known_hosts=None, login_timeout=15, 
+                    client_version='SSH-2.0-PushkinEngine',
+                ) as conn:
+                    
+                    writer, reader, _ = await conn.open_session()
+                    
+                    # 2. ОТПРАВКА: Залп всех команд разом
+                    payload = '\n'.join(commands) + '\n'
+                    writer.write(payload)
+                    await writer.drain()
 
-        # 6. READ AUDIT LOG (And optional post-backup)
-        if make_backup:
-            chan.send("terminal length 0\nshow running-config\n")
+                    # 3. ЧТЕНИЕ С МОНИТОРИНГОМ (Live Stream + Safety Switch)
+                    try:
+                        while True:
+                            # Ждем данные (quiet_period — наш таймаут тишины)
+                            chunk = await asyncio.wait_for(
+                                reader.read(65535), 
+                                timeout=quiet_period
+                            )
+                            if not chunk: break
+                            
+                            full_log.append(chunk)
+                            
+                            # Отправляем кусок лога в Redis для Live Stream трансляции
+                            if self.redis:
+                                await self.redis.publish(channel_name, chunk)
+                            
+                            # Проверка на ошибки
+                            chunk_lower = chunk.lower()
+                            if any(word in chunk_lower for word in self.STOP_WORDS):
+                                error_detected = True
+                                
+                                # Определяем, на какой команде споткнулись
+                                current_buffer = "".join(full_log)
+                                for cmd in reversed(commands):
+                                    if cmd in current_buffer:
+                                        failed_command = cmd
+                                        break
+                                break # Выход из цикла чтения при ошибке
+                                
+                    except asyncio.TimeoutError:
+                        # Тишина в эфире — нормальное завершение для Burst-метода
+                        pass
 
-        output = ""
-        while True:
-            readable, _, _ = select.select([chan], [], [], read_timeout)
-            if readable:
-                try:
-                    data = chan.recv(65535).decode('utf-8', errors='ignore')
-                    if not data: break
-                    output += data
-                except: break
-            else:
-                break # 0.1s of silence = done
+                    # 4. ЛОГИКА ROLLBACK (если нашли ошибку)
+                    if error_detected:
+                        msg = f"\n[!] STOP-WORD DETECTED. Failed on: '{failed_command}'\n[!] STARTING ROLLBACK...\n"
+                        full_log.append(msg)
+                        if self.redis: await self.redis.publish(channel_name, msg)
+                        
+                        # Шлем команды отката
+                        writer.write('\n'.join(self.ROLLBACK_COMMANDS) + '\n')
+                        await writer.drain()
+                        
+                        try:
+                            # Дочитываем финальный ответ после отката
+                            final = await asyncio.wait_for(reader.read(65535), timeout=2.0)
+                            full_log.append(final)
+                            if self.redis: await self.redis.publish(channel_name, final)
+                        except asyncio.TimeoutError:
+                            pass
 
-        # 7. SUCCESS CALLBACKS
-        if send_notify:
-            send_telegram_alert(f"✅ *{device_ip}* configured successfully.\nCommands: {len(commands)}")
+                execution_time = round(time.time() - start_time, 2)
+                return {
+                    "id": device_id,
+                    "status": "error_rolled_back" if error_detected else "success",
+                    "failed_on": failed_command,
+                    "log": "".join(full_log),
+                    "time": execution_time
+                }
 
-        return {"status": "success", "ip": device_ip, "log_sample": output[:500]}
+            except Exception as e:
+                err_msg = f"\n[!] CONNECTION ERROR: {str(e)}\n"
+                if self.redis: await self.redis.publish(channel_name, err_msg)
+                return {
+                    "id": device_id,
+                    "status": "connection_error",
+                    "error": str(e)
+                }
 
-    except paramiko.AuthenticationException:
-        # FATAL: Don't retry on wrong passwords to avoid lockout
-        return {"status": "failed", "reason": "Auth Error"}
-    
-    except (socket.timeout, paramiko.SSHException, NetworkUnreachableError) as e:
-        # RETRY: Network glitch or device rebooting
-        raise NetworkUnreachableError(f"Network error: {str(e)}")
-
-    finally:
-        client.close()
-        redis_conn.delete(lock_key) # Always release the lock
-
-def health_check_worker(device_ip):
-    """Background health check: Ping + SSH Handshake."""
-    import subprocess
-    # 1. ICMP Check
-    ping = subprocess.run(["ping", "-c", "1", "-W", "1", device_ip], stdout=subprocess.DEVNULL)
-    status = {"last_check": datetime.now().isoformat(), "icmp_up": ping.returncode == 0, "ssh_up": False}
-    
-    # 2. SSH Check (if ICMP is up)
-    if status["icmp_up"]:
-        # Logic to try paramiko.connect() without commands
-        pass
-
-    redis_conn.hset(f"device:status:{device_ip}", mapping=status)
+    async def run_mass_config(self, device_list, job_id):
+        """
+        Запускает пачку устройств и собирает результаты.
+        """
+        tasks = [
+            self.run_pushkin_task(d, job_id) 
+            for d in device_list
+        ]
+        # Собираем всё через gather (выполнится за время самого долгого устройства)
+        return await asyncio.gather(*tasks)
 

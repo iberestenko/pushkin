@@ -1,0 +1,21 @@
+# Используем легковесный образ Python
+FROM python:3.10-slim
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Устанавливаем только одну зависимость — asyncssh
+# Она нужна для работы нашего mock_switch.py
+RUN pip install --no-cache-dir asyncssh
+
+# Копируем код самого эмулятора из папки app
+COPY app/mock_switch.py .
+
+# Отключаем буферизацию логов Python, чтобы видеть вывод в docker logs сразу
+ENV PYTHONUNBUFFERED=1
+
+# Запускаем мок. 
+# Внутри контейнера он слушает порт 22. 
+# --lags включает имитацию сетевых задержек.
+CMD ["python", "mock_switch.py", "--port", "22", "--lags", "--max-lag", "1.0"]
+

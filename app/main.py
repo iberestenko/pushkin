@@ -1,153 +1,127 @@
-import json
-import os
-from typing import List, Optional
-from fastapi import FastAPI, BackgroundTasks, HTTPException, Depends
+import uuid
+import asyncio
+from typing import List
+from datetime import timedelta
+
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, validator
-from redis import Redis
-from rq import Queue
+from fastapi.staticfiles import StaticFiles
 
-# Import our custom logic
-from templates import DEFAULT_TEMPLATES
-from worker import pushkin_fire, health_check_worker
+import redis.asyncio as redis
+from worker import PushkinAsyncEngine  # Импорт нашего движка
+from auth import (
+    authenticate_user, create_access_token, get_current_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES, SECRET_KEY, ALGORITHM
+)
 
-app = FastAPI(title="Pushkin NetOps Control Plane")
+app = FastAPI(title="Pushkin Engine API")
 
-# Initialize Redis Connection
-# In Docker, 'redis' is the hostname defined in docker-compose.yml
-redis_conn = Redis(host=os.getenv('REDIS_HOST', 'redis'), port=6379, decode_responses=False)
-q = Queue(connection=redis_conn)
+# Настройки Redis
+REDIS_HOST = "redis_db" # Имя сервиса в docker-compose
+redis_client = redis.Redis(host=REDIS_HOST, port=6379, decode_responses=True)
 
-# --- MODELS ---
+# Инициализация движка (лимит 500 одновременных сессий)
+engine = PushkinAsyncEngine(max_concurrent=500, redis_instance=redis_client)
 
-class DeviceRegister(BaseModel):
-    ip: str
-    username: str
-    password: str
-    vendor: str = "cisco"
-    port: int = Field(default=22, ge=1, le=65535)
-    chunk_size: int = 8192
-    read_timeout: float = 0.1
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
-class ConfigAction(BaseModel):
-    ip: str
-    action: str
-    params: dict = {}
-    send_notify: bool = False
-    make_backup: bool = False
-    safe_mode: bool = False  # If True, triggers Pre-fire backup
+# --- МАРШРУТЫ АВТОРИЗАЦИИ ---
 
-# --- API ENDPOINTS ---
-
-@app.post("/devices/register")
-async def register_device(dev: DeviceRegister):
-    """Registers a network device passport in Redis storage."""
-    redis_conn.hset(f"device:info:{dev.ip}", mapping=dev.dict())
-    return {"status": "registered", "ip": dev.ip, "ssh_port": dev.port}
-
-@app.get("/dashboard")
-async def get_dashboard():
-    """Aggregates data for the frontend monitoring table."""
-    devices = []
-    # scan_iter is safe for Highload (doesn't block Redis)
-    for key in redis_conn.scan_iter("device:info:*"):
-        ip = key.decode().split(":")[-1]
-        info = redis_conn.hgetall(key)
-        status = redis_conn.hgetall(f"device:status:{ip}")
-        
-        devices.append({
-            "ip": ip,
-            "vendor": info.get(b'vendor', b'cisco').decode(),
-            "port": int(info.get(b'port', 22)),
-            "status": {
-                "icmp": status.get(b'icmp_up') == b'True',
-                "ssh": status.get(b'ssh_up') == b'True',
-                "last_check": status.get(b'last_check', b'Never').decode()
-            }
-        })
-    return {"devices": devices}
-
-@app.post("/push-abstract")
-async def push_abstract(req: ConfigAction):
-    """Translates intent (e.g. create_vlan) into vendor CLI and fires it."""
-    # 1. Get device vendor and settings
-    dev_info = redis_conn.hgetall(f"device:info:{req.ip}")
-    if not dev_info:
-        raise HTTPException(status_code=404, detail="Device not registered")
-    
-    vendor = dev_info.get(b'vendor', b'cisco').decode()
-    
-    # 2. Find template in DEFAULT_TEMPLATES (or TODO: fetch from Redis overrides)
-    tpl_list = DEFAULT_TEMPLATES.get(vendor, {}).get(req.action)
-    if not tpl_list:
-        raise HTTPException(status_code=400, detail=f"Vendor {vendor} doesn't support {req.action}")
-
-    # 3. Render commands using Jinja2
-    from jinja2 import Template
-    rendered_cmds = [Template(c).render(**req.params) for c in tpl_list]
-
-    # 4. Enqueue task to Worker
-    job = q.enqueue(
-        pushkin_fire,
-        req.ip,
-        rendered_cmds,
-        send_notify=req.send_notify,
-        make_backup=req.make_backup,
-        pre_backup=req.safe_mode
+@app.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
     )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# --- ОСНОВНОЙ API ---
+
+@app.post("/push", status_code=status.HTTP_202_ACCEPTED)
+async def start_mass_config(
+    device_list: List[dict], 
+    background_tasks: BackgroundTasks,
+    job_id: str = None,  # Добавляем необязательный параметр
+    current_user: str = Depends(get_current_user)
+):
+    """
+    Принимает список устройств и команд. 
+    Мгновенно возвращает job_id и запускает процесс в фоне.
+    """
+    final_job_id = job_id or str(uuid.uuid4())
+    
+    # Сохраняем начальный статус в Redis
+    await redis_client.set(f"pushkin:job:{final_job_id}", "running", ex=86400)
+
+    # Фоновая функция для выполнения задач и сохранения результата
+    async def run_and_save():
+        results = await engine.run_mass_config(device_list, job_id=final_job_id)
+        # Сохраняем финальный JSON с результатами
+        import json
+        await redis_client.set(
+            f"pushkin:job:{final_job_id}:results", 
+            json.dumps(results), 
+            ex=86400
+        )
+        await redis_client.set(f"pushkin:job:{final_job_id}", "completed", ex=86400)
+
+    background_tasks.add_task(run_and_save)
     
     return {
-        "status": "queued", 
-        "job_id": job.get_id(), 
-        "vendor": vendor,
-        "commands": rendered_cmds
+        "job_id": final_job_id,
+        "status": "accepted",
+        "message": f"Processing {len(device_list)} devices",
+        "started_by": current_user
     }
 
-@app.get("/vlan/allocate")
-async def allocate_vlan(path_name: str, start_id: int = 100):
-    """Finds and reserves the first free VLAN ID on a specific network path."""
-    # Check if path exists in nstat/topology
-    path_raw = redis_conn.get(f"topology:path:{path_name}")
-    if not path_raw:
-        raise HTTPException(status_code=404, detail="Topology path not found")
+@app.get("/status/{job_id}")
+async def get_job_status(job_id: str, current_user: str = Depends(get_current_user)):
+    """Получение текущего статуса и результатов задачи"""
+    job_status = await redis_client.get(f"pushkin:job:{job_id}")
+    if not job_status:
+        raise HTTPException(status_code=404, detail="Job not found")
     
-    # Simple atomic reservation loop
-    for vlan_id in range(start_id, 4095):
-        res_key = f"vlan_res:{path_name}:{vlan_id}"
-        # SET NX EX: Only if not exists, expire in 5 mins
-        if redis_conn.set(res_key, "reserved", nx=True, ex=300):
-            return {
-                "vlan_id": vlan_id, 
-                "status": "reserved", 
-                "path": path_name,
-                "expires": "300s"
-            }
-            
-    raise HTTPException(status_code=507, detail="IPAM: No free VLANs available in this range")
+    results = await redis_client.get(f"pushkin:job:{job_id}:results")
+    
+    import json
+    return {
+        "job_id": job_id,
+        "status": job_status,
+        "data": json.loads(results) if results else None
+    }
 
-@app.get("/health-check/all")
-async def trigger_mass_health_check():
-    """Triggers background health checks for all registered devices."""
-    count = 0
-    for key in redis_conn.scan_iter("device:info:*"):
-        ip = key.decode().split(":")[-1]
-        q.enqueue(health_check_worker, ip)
-        count += 1
-    return {"status": "triggered", "jobs_count": count}
+# --- WEBSOCKET LIVE STREAM ---
+
+@app.websocket("/ws/stream/{job_id}/{host}/{port}")
+async def websocket_endpoint(websocket: WebSocket, job_id: str, host: str, port: int):
+    """Трансляция логов конкретного устройства в реальном времени"""
+    await websocket.accept()
+    
+    channel_name = f"pushkin:stream:{job_id}:{host}:{port}"
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe(channel_name)
+    
+    try:
+        async for message in pubsub.listen():
+            if message['type'] == 'message':
+                await websocket.send_text(message['data'])
+    except WebSocketDisconnect:
+        print(f"Client disconnected from stream {channel_name}")
+    finally:
+        await pubsub.unsubscribe(channel_name)
+
+# --- СТАТИКА (ИНТЕРФЕЙС ТЕРМИНАЛА) ---
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    """Serves the Dashboard UI."""
-    try:
-        with open("index.html", "r", encoding="utf-8") as f:
-            return f.read()
-    except FileNotFoundError:
-        return "<h1>Pushkin UI file (index.html) is missing.</h1>"
-
-# --- TODO: NSTAT INTEGRATION ---
-@app.post("/topology/sync-nstat")
-async def sync_nstat(path_name: str, nodes: List[dict]):
-    """Endpoint for external nstat (NetBox) integration to push topology."""
-    redis_conn.set(f"topology:path:{path_name}", json.dumps(nodes))
-    return {"status": "topology_updated", "path": path_name}
+async def get_terminal():
+    with open("index.html", "r") as f:
+        return f.read()
 

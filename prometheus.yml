@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s # Частота сбора метрик. Для бенчмарков лучше 5с.
+
+scrape_configs:
+  - job_name: 'pushkin_engine'
+    static_configs:
+      - targets: ['redis_exporter:9121'] # Адрес экспортера внутри Docker сети
+
