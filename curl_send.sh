@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 curl -X POST "http://localhost:8000/push?job_id=benchmark" \
-     -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTc3ODEwNDc5MX0.TUDcOgCFpJrGvMm_ILUcZt1-W1C9a6-yRJxwUZ3dcB0" \
+     -H "Authorization: Bearer $TOKEN"
      -H "Content-Type: application/json" \
      -d '[{
        "ip": "mock_switch",
