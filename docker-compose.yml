@@ -30,6 +30,9 @@ services:
     image: oliver006/redis_exporter:latest
     environment:
       - REDIS_ADDR=redis_db:6379
+    command: ["--check-keys", "pushkin:metrics:*"]
+    ports:
+      - "9121:9121"
     depends_on:
       - redis_db
 
@@ -46,6 +49,8 @@ services:
     image: grafana/grafana:latest
     ports:
       - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana # Данные будут жить тут
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     depends_on:
@@ -67,3 +72,5 @@ services:
         soft: 1024
         hard: 1024
 
+volumes:
+  grafana_data: # Объявляем именованный том

@@ -7,7 +7,11 @@ import redis.asyncio as redis
 async def run_benchmark(total_devices, concurrent_limit, quiet_period):
     # Подключаемся к Redis для сброса метрик перед тестом
     r = redis.Redis(host='localhost', port=6379, decode_responses=True)
-    await r.flushdb() # Чистим старые метрики
+    # await r.flushdb() # Чистим старые метрики
+    await r.delete("pushkin:metrics:total_processed")
+    await r.delete("pushkin:metrics:config_errors")
+    await r.delete("pushkin:metrics:conn_errors")
+    await r.set("pushkin:metrics:active_sessions", 0)
     
     engine = PushkinAsyncEngine(max_concurrent=concurrent_limit, redis_instance=r)
     

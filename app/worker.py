@@ -31,7 +31,10 @@ class PushkinAsyncEngine:
         device_id = f"{host}:{port}"
         channel_name = f"pushkin:stream:{job_id}:{host}:{port}"
         
+        if self.redis: await self.redis.set("pushkin:metrics:conn_errors", 0)
         async with self.semaphore:
+            if self.redis:
+                await self.redis.incr("pushkin:metrics:active_sessions")
             start_time = time.time()
             full_log = []
             failed_command = None
@@ -87,6 +90,7 @@ class PushkinAsyncEngine:
 
                     # 4. ЛОГИКА ROLLBACK (если нашли ошибку)
                     if error_detected:
+                        if self.redis: await self.redis.incr("pushkin:metrics:config_errors")
                         msg = f"\n[!] STOP-WORD DETECTED. Failed on: '{failed_command}'\n[!] STARTING ROLLBACK...\n"
                         full_log.append(msg)
                         if self.redis: await self.redis.publish(channel_name, msg)
@@ -104,6 +108,8 @@ class PushkinAsyncEngine:
                             pass
 
                 execution_time = round(time.time() - start_time, 2)
+                if not error_detected and self.redis:
+                    await self.redis.incr("pushkin:metrics:total_processed")
                 return {
                     "id": device_id,
                     "status": "error_rolled_back" if error_detected else "success",
@@ -115,11 +121,14 @@ class PushkinAsyncEngine:
             except Exception as e:
                 err_msg = f"\n[!] CONNECTION ERROR: {str(e)}\n"
                 if self.redis: await self.redis.publish(channel_name, err_msg)
+                if self.redis: await self.redis.incr("pushkin:metrics:conn_errors")
                 return {
                     "id": device_id,
                     "status": "connection_error",
                     "error": str(e)
                 }
+            finally:
+                if self.redis: await self.redis.decr("pushkin:metrics:active_sessions")
 
     async def run_mass_config(self, device_list, job_id):
         """
