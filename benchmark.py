@@ -2,6 +2,7 @@ import asyncio
 import time
 import argparse
 from app.worker import PushkinAsyncEngine
+from app.brains import render_pushkin_template
 import redis.asyncio as redis
 
 async def run_benchmark(total_devices, concurrent_limit, quiet_period):
@@ -28,7 +29,7 @@ async def run_benchmark(total_devices, concurrent_limit, quiet_period):
                 "interface Gi0/1", 
                 "ip address 1.1.1.1 255.255.255.0", 
                 "end"
-            ]
+            ] + render_pushkin_template("cisco", "create_vlan", {"vlan_id": 100, "vlan_name": "FROM_TEMPLATE"})
         } for i in range(total_devices)
     ]
 
