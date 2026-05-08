@@ -1,0 +1,8 @@
+10.0.0.1
+
+create vlan: vlan_id=110 vlan_name="DESCRIPTION FOR VLAN 110"
+
+
+10.0.0.2
+
+create vlan: vlan_id=120 vlan_name="DESCRIPTION FOR VLAN 120"
