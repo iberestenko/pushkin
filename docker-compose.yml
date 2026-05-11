@@ -63,7 +63,7 @@ services:
       context: .
       dockerfile: Dockerfile.mock
     ports:
-      - "2222:22"
+      - "2222-2232:22"
     environment:
       - PYTHONUNBUFFERED=1
     # Порт 22 открыт только внутри сети Docker для Пушкина

@@ -27,6 +27,11 @@ DEFAULT_TEMPLATES = {
         "set_description": [
             "interface {{ port }}",
             "description PUSHKIN_PROVISIONED_{{ vlan_name }}"
+        ],
+        "set_snmp": [
+            "snmp-server community {{ community }} {{ mode|default('RO') }}",
+            "snmp-server contact Network_Team",
+            "exit"
         ]
     },
     "huawei": {
@@ -47,11 +52,34 @@ DEFAULT_TEMPLATES = {
             "interface {{ port }}",
             "port link-type access",
             "port default vlan {{ vlan_id }}"
+        ],
+        "set_snmp": [
+            "snmp-agent community {{ 'read' if mode == 'ro' else 'write' }} {{ community }}"
+            "snmp-agent sys-info version all",
+            "exit"
         ]
     },
+    "eltex": {
+        "set_snmp": [
+            "snmp-server community {{ community }} {{ mode|upper|default('RO') }}",
+            "exit"
+        ]
+    },
+    "dlink-old": {
+        "set_snmp": [
+            "enable snmp",
+            "create snmp community {{ community }} view Default {{ mode|default('read_only') }}",
+            "save"
+        ]
+    },
+    #TODO: make proper snmp mode for all vendors
     "mikrotik": {
         "create_vlan": [
             "/interface vlan add name={{ vlan_name }} vlan-id={{ vlan_id }} interface=bridge"
+        ],
+        "set_snmp": [
+            "/snmp community set [find name=public] name={{ community }} read-access={{ 'yes' if mode == 'ro' else 'no' }}",
+            "/snmp set enabled=yes"
         ]
     }
 }

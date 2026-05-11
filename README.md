@@ -106,11 +106,113 @@ python benchmark.py --total 15000 --concurrent 1000
 ---
 
 ## 🛸 Тест на реальных устройствах
-Для тестирования реальных устройств можно отредактировать файл real_test.py (внутри список устройств с командами) и запустить
+Для тестирования реальных устройств можно отредактировать файл ```real_test.py``` (внутри список устройств с командами) и запустить
 ```bash
 python3 real_test.py
 ```
 
 ---
 
+## 📝 Команды из текстового файла
+В файле ```templates.py``` определяются шаблоны команд, которые знает Пушкин. Названия шаблонов становятся универсальными командами (не зависящими от вендора, например ```create vlan```), которые транслируются в конкретные команды вендора. Шаблоны команд задаются в обычном текстовом файле, например ```jobs-cisco.txt``` В нем нужно будет указать адрес устройства, шаблон(ы) команд и аргумент(ы) шаблона. Например:
+```bash
+адрес устройства (ip или dns-имя)
+
+шаблон команды: аргументы команды
+... (здесь могут быть еще шаблоны)
+```
+
+например:
+
+```
+% cat app/templates.py 
+import json
+
+# --- THE PUSHKIN DICTIONARY ---
+# This dictionary maps "Abstract Actions" to specific CLI commands.
+# We use Jinja2 syntax ({{ variable }}) for dynamic parameter injection.
+
+DEFAULT_TEMPLATES = {
+    "cisco": {
+        "create_vlan": [
+            "vlan {{ vlan_id }}",
+            "name {{ vlan_name }}",
+            "exit"
+        ],
+        "delete_vlan": [
+            "no vlan {{ vlan_id }}"
+        ],
+        "tag_port": [
+            "interface {{ port }}",
+            "switchport trunk allowed vlan add {{ vlan_id }}"
+        ],
+        "untag_port": [
+            "interface {{ port }}",
+            "switchport mode access",
+            "switchport access vlan {{ vlan_id }}",
+            "no shutdown"
+        ],
+        "set_description": [
+            "interface {{ port }}",
+            "description PUSHKIN_PROVISIONED_{{ vlan_name }}"
+        ],
+        "set_snmp": [
+...
+
+% cat jobs-cisco.txt 
+10.0.0.1
+
+create vlan: vlan_id=110 vlan_name="DESCRIPTION FOR VLAN 110"
+tag port: port=Ge0/0/1 vlan_id=110
+
+
+10.0.0.2
+
+create vlan: vlan_id=120 vlan_name="DESCRIPTION FOR VLAN 120"
+set snmp: community=my_snmp_community mode=ro
+```
+
+Для отправки конфигурации на устройства с помощью шаблонов воспользуйтесь ```fire.py```
+```bash
+% LOGNAME=admin python3 fire.py --help                        
+Enter your password:
+usage: fire.py [-h] [--dry-run] commands_file vendor
+
+Pushkin Engine: CLI Fire Tool
+
+positional arguments:
+  commands_file  Path to the jobs.txt file
+  vendor         Vendor name (cisco, huawei, eltex, mikrotik, ...)
+
+optional arguments:
+  -h, --help     show this help message and exit
+  --dry-run      Show commands without sending them
+```
+например
+```bash
+% LOGNAME=admin python3 fire.py jobs-cisco.txt cisco
+```
+
+Переменная ```LOGNAME``` (или ```USER```) задает имя пользователя от имени которого будет выполнен логин на устройство.
+
+Для проверки того какие команды будут реально отправлены на устройство после парсинга шаблонов с аргументами, воспользуйтесь флагом --dry-run 
+```bash
+% LOGNAME=admin python3 fire.py --dry-run jobs-cisco.txt cisco
+Enter your password:
+📖 Reading jobs from: jobs-cisco.txt (Vendor: cisco)
+
+
+👾 HOST: 127.0.0.1:2222
+📝 CMDS: ['vlan 110', 'name DESCRIPTION FOR VLAN 110', 'exit', 'interface Ge0/0/1', 'switchport trunk allowed vlan add 110']
+
+👾 HOST: 127.0.0.1:2223
+📝 CMDS: ['vlan 120', 'name DESCRIPTION FOR VLAN 120', 'exit', 'snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2224
+📝 CMDS: ['vlan 100', 'name DESCRIPTION FOR VLAN 100', 'exit']
+
+...
+```
+
+---
 *Pushkin Engine — конфигурация всей сети страны за время одного перерыва на кофе.* ☕️

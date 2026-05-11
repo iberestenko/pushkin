@@ -1,8 +1,59 @@
-10.0.0.1
+127.0.0.1 2222
 
 create vlan: vlan_id=110 vlan_name="DESCRIPTION FOR VLAN 110"
+tag port: port=Ge0/0/1 vlan_id=110
 
 
-10.0.0.2
+127.0.0.1 2223
 
 create vlan: vlan_id=120 vlan_name="DESCRIPTION FOR VLAN 120"
+set snmp: community=my_snmp_community mode=ro
+
+
+127.0.0.1 2224
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1 2225
+
+create vlan: vlan_id=110 vlan_name="DESCRIPTION FOR VLAN 110"
+tag port: port=Ge0/0/1 vlan_id=110
+
+
+127.0.0.1 2226
+
+create vlan: vlan_id=120 vlan_name="DESCRIPTION FOR VLAN 120"
+set snmp: community=my_snmp_community mode=ro
+
+
+127.0.0.1 2227
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1 2228
+
+create vlan: vlan_id=110 vlan_name="DESCRIPTION FOR VLAN 110"
+tag port: port=Ge0/0/1 vlan_id=110
+
+
+127.0.0.1 2229
+
+create vlan: vlan_id=120 vlan_name="DESCRIPTION FOR VLAN 120"
+set snmp: community=my_snmp_community mode=ro
+
+
+127.0.0.1 2230
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1 2231
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1 2232
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"

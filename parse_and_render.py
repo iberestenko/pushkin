@@ -1,55 +1,71 @@
 import re
+import shlex
 from app.brains import render_pushkin_template
 
 def parse_config_file(file_path, vendor="cisco"):
     tasks = []
-    current_ip = None
-    
-    # Регулярка для аргументов (поддерживает кавычки)
-    arg_regex = r'(\w+)=("(?:\\"|[^"])*"|\S+)'
+    # Словарь для хранения команд по каждому устройству: { ip: [cmd1, cmd2, ...] }
+    device_commands = {}
+    current_host = None
+
+    # Регулярка для IP или DNS-имени (начинается с буквы/цифры, может содержать точки и дефисы)
+    # Исключает строки с двоеточием (чтобы не спутать с командой)
+    host_regex = r'^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]))*$'
 
     with open(file_path, "r") as f:
         for line in f:
             line = line.strip()
-            if not line:
+            if not line: continue
+
+            # 1. Проверяем, является ли строка Хостом (IP или DNS)
+            # Условие: регулярка совпала И в строке нет двоеточия (команды)
+            if re.match(host_regex, line) and ":" not in line:
+                current_host = line
+                if current_host not in device_commands:
+                    device_commands[current_host] = []
                 continue
 
-            # 1. Проверяем, является ли строка IP-адресом (простой паттерн)
-            if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', line):
-                current_ip = line
-                continue
-
-            # 2. Если есть текущий IP и строка содержит двоеточие (это команда)
-            if current_ip and ":" in line:
-                # Разбиваем на: название шаблона и аргументы
+            # 2. Обработка команды для текущего хоста
+            if current_host and ":" in line:
                 template_raw, args_raw = line.split(":", 1)
-                
                 template_name = template_raw.strip().replace(" ", "_")
                 
-                # Парсим аргументы
-                arg_pairs = re.findall(arg_regex, args_raw)
-                params = {k: v.strip('"') for k, v in arg_pairs}
-
-                # Рендерим команды
-                commands = render_pushkin_template(vendor, template_name, params)
+                try:
+                    # Разбираем аргументы через shlex (умные кавычки)
+                    lexer = shlex.shlex(args_raw, posix=True)
+                    lexer.whitespace_split = True
+                    raw_args_list = list(lexer)
+                    
+                    params = {}
+                    for item in raw_args_list:
+                        if "=" in item:
+                            k, v = item.split("=", 1)
+                            params[k] = v
+                    
+                    # Рендерим шаблон
+                    rendered = render_pushkin_template(vendor, template_name, params)
+                    if rendered:
+                        # Добавляем список команд к текущему устройству
+                        device_commands[current_host].extend(rendered)
                 
-                if commands:
-                    tasks.append({
-                        "ip": current_ip,
-                        "port": 22,
-                        "user": "admin",
-                        "pw": "password",
-                        "cmds": commands
-                    })
-                else:
-                    print(f"⚠️  Шаблон '{template_name}' не найден для вендора {vendor}")
+                except Exception as e:
+                    print(f"❌ Ошибка в строке '{line}': {e}")
 
+    # Формируем финальный список задач для Пушкина
+    for host, cmds in device_commands.items():
+        if cmds:
+            tasks.append({
+                "ip": host,
+                "port": 22,
+                "user": "admin",
+                "pw": "password",
+                "cmds": cmds
+            })
+    
     return tasks
 
-# --- ПРОВЕРКА ---
 if __name__ == "__main__":
     all_tasks = parse_config_file("jobs-cisco.txt", vendor="cisco")
-    
     for task in all_tasks:
-        print(f"Device: {task['ip']}")
-        print(f"Commands: {task['cmds']}\n")
+        print(f"HOST: {task['ip']}")
+        print(f"CMDS: {task['cmds']}\n")

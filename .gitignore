@@ -7,3 +7,4 @@ backups/
 auth_keys/
 .DS_Store
 .swp
+.vscode/

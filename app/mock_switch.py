@@ -31,11 +31,17 @@ async def handle_client(process):
         async for line in process.stdin:
             cmd = line.strip()
             if not cmd: continue
-            
+
             print(f"  [Command received]: {cmd}")
+            process.stdout.write(f"  [Command received]: {cmd}\r\n")
             
             # Имитируем работу
             await asyncio.sleep(0.1)
+
+            if random.random() < 0.1:  # 10% шанс ошибки
+                process.stdout.write("% Invalid input detected at '^' marker.\r\n")
+                process.stdout.write("switch# ")
+                continue
             
             if cmd == "conf t":
                 process.stdout.write("switch(config)# ")
@@ -73,7 +79,7 @@ async def run_server(port):
         host='', 
         port=port, 
         server_host_keys=[server_key],
-        process_factory=handle_client
+        process_factory=handle_client,
     )
     print(f"[+] Mock Switch listening on port {port}")
 

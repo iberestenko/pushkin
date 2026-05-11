@@ -1,7 +1,6 @@
 import asyncio
 import asyncssh
 import time
-import json
 
 class PushkinAsyncEngine:
     # Список стоп-слов для "предохранителя"
@@ -96,14 +95,25 @@ class PushkinAsyncEngine:
                         if self.redis: await self.redis.publish(channel_name, msg)
                         
                         # Шлем команды отката
-                        writer.write('\n'.join(self.ROLLBACK_COMMANDS) + '\n')
-                        await writer.drain()
-                        
                         try:
-                            # Дочитываем финальный ответ после отката
-                            final = await asyncio.wait_for(reader.read(65535), timeout=2.0)
-                            full_log.append(final)
-                            if self.redis: await self.redis.publish(channel_name, final)
+                            writer.write('\n'.join(self.ROLLBACK_COMMANDS) + '\n')
+                            await writer.drain()
+                        except Exception as e:
+                            return {
+                                "id": device_id,
+                                "status": f"error_when_rolling_back: {str(e)}",
+                                "failed_on": failed_command,
+                                "log": "".join(full_log),
+                            }
+
+                        try:
+                            while True:
+                                # Дочитываем финальный ответ после отката
+                                final = await asyncio.wait_for(reader.read(65535), timeout=quiet_period)
+                                full_log.append(final)
+                                if self.redis: await self.redis.publish(channel_name, final)
+                                if not final:
+                                    break
                         except asyncio.TimeoutError:
                             pass
 
@@ -124,8 +134,9 @@ class PushkinAsyncEngine:
                 if self.redis: await self.redis.incr("pushkin:metrics:conn_errors")
                 return {
                     "id": device_id,
-                    "status": "connection_error",
-                    "error": str(e)
+                    "status": f"connection_error: {err_msg}",
+                    "error": str(e),
+                    "log": None
                 }
             finally:
                 if self.redis: await self.redis.decr("pushkin:metrics:active_sessions")
