@@ -19,7 +19,7 @@ def parse_jobs(file_path, vendor):
     device_commands = {}
     current_host = current_port = device_id = None
     hosts_regex = r'^[a-zA-Z0-9][a-zA-Z0-9:.-]*(?::\d+)?(?:,\s*[a-zA-Z0-9][a-zA-Z0-9:.-]*(?::\d+)?)*$'
-    # TODO: set port via name:port
+    # TODO: add multiline support for hosts
     try:
         with open(file_path, "r") as f:
             for line in f:
