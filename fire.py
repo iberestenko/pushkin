@@ -107,6 +107,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
+        print(f"🎸 Логин будет от имени {USER}")
         asyncio.run(fire(args.commands_file, args.vendor, args.dry_run))
     except KeyboardInterrupt:
         print("\n[!] Stopped by user.")
