@@ -214,5 +214,76 @@ Enter your password:
 ...
 ```
 
+Отправка команд возможна для набора устройств (одни и те же команды будут отправлены на все устройства), например
+
+```bash
+% cat jobs-cisco-multi.txt
+# это комментарий
+#
+#
+
+127.0.0.1:2222, 127.0.0.1:2223, 127.0.0.1:2224  #first batch
+set snmp: community=my_snmp_community mode=ro
+
+
+127.0.0.1:2230
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1:2231
+
+delete vlan: vlan_id=100 
+
+
+127.0.0.1:2232
+
+tag port: port=GigabitEthernet0/0/1 vlan_id=100
+
+
+# second batch
+127.0.0.1:2225, 127.0.0.1:2226, 127.0.0.1:2227, 127.0.0.1:2228, 127.0.0.1:2229
+
+set snmp: community=my_snmp_community mode=ro
+```
+```bash
+% LOGNAME=admin python3 fire.py --dry-run jobs-cisco-multi.txt cisco
+Enter your password:
+📖 Reading jobs from: jobs-cisco-multi.txt (Vendor: cisco)
+
+
+👾 HOST: 127.0.0.1:2222
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2223
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2224
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2230
+📝 CMDS: ['vlan 100', 'name DESCRIPTION FOR VLAN 100', 'exit']
+
+👾 HOST: 127.0.0.1:2231
+📝 CMDS: ['no vlan 100']
+
+👾 HOST: 127.0.0.1:2232
+📝 CMDS: ['interface GigabitEthernet0/0/1', 'switchport trunk allowed vlan add 100']
+
+👾 HOST: 127.0.0.1:2225
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2226
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2227
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2228
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+
+👾 HOST: 127.0.0.1:2229
+📝 CMDS: ['snmp-server community my_snmp_community ro', 'snmp-server contact Network_Team', 'exit']
+```
 ---
 *Pushkin Engine — конфигурация всей сети страны за время одного перерыва на кофе.* ☕️

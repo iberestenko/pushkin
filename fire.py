@@ -18,28 +18,27 @@ def parse_jobs(file_path, vendor):
     """Парсит файл и группирует команды по хостам."""
     device_commands = {}
     current_host = current_port = device_id = None
-    host_regex = r'^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])(\.([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\-]{0,61}[a-zA-Z0-9]))*(\s[0-9]+)?$'
+    hosts_regex = r'^[a-zA-Z0-9][a-zA-Z0-9:.-]*(?::\d+)?(?:,\s*[a-zA-Z0-9][a-zA-Z0-9:.-]*(?::\d+)?)*$'
     # TODO: set port via name:port
     try:
         with open(file_path, "r") as f:
             for line in f:
-                line = line.strip()
+                line = line.split('#')[0].strip()
                 if not line: continue
 
-                if re.match(host_regex, line) and ":" not in line:
-                    if ' ' in line:
-                        split = line.split(' ', 1)
-                        current_host = split[0]
-                        current_port = split[1]
+                if re.match(hosts_regex, line):
+                    commands_list = []
+                    for device in line.split(','):
+                        device = device.strip()
+                        parts = device.split(':', 1)
+                        current_host = parts[0]
+                        current_port = parts[1] if len(parts) > 1 else '22'
                         device_id = f"{current_host}:{current_port}"
-                    else:
-                        current_host = line
-                        device_id = f"{current_host}:22"
-                    if device_id not in device_commands:
-                        device_commands[device_id] = []
+                        if device_id not in device_commands:
+                            device_commands[device_id] = commands_list  # один список на каждый набор хостов
                     continue
 
-                if device_id and ":" in line:
+                if device_id and ":" in line:  # есть хотя бы одно устройство и есть двоеточие в строке
                     template_raw, args_raw = line.split(":", 1)
                     template_name = template_raw.strip().replace(" ", "_")
                     

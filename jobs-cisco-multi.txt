@@ -1,0 +1,27 @@
+# это комментарий
+#
+#
+
+127.0.0.1:2222, 127.0.0.1:2223, 127.0.0.1:2224  #first batch
+set snmp: community=my_snmp_community mode=ro
+
+
+127.0.0.1:2230
+
+create vlan: vlan_id=100 vlan_name="DESCRIPTION FOR VLAN 100"
+
+
+127.0.0.1:2231
+
+delete vlan: vlan_id=100
+
+
+127.0.0.1:2232
+
+tag port: port=GigabitEthernet0/0/1 vlan_id=100
+
+
+# second batch
+127.0.0.1:2225, 127.0.0.1:2226, 127.0.0.1:2227, 127.0.0.1:2228, 127.0.0.1:2229
+
+set snmp: community=my_snmp_community mode=ro
