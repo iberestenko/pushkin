@@ -94,11 +94,19 @@ WebSocket-канал для получения логов «буква в бук
 
 ## 🚀 Быстрый старт
 ```bash
+# 0. Скачать проект и установить зависимости
+git clone https://github.com/iberestenko/pushkin
+
+pip3 install asyncssh
+
 # 1. Запуск всей инфраструктуры (API, Redis, Monitoring, 10 Mocks)
 docker-compose up -d --build --scale mock_switch=10
 
 # 2. Запуск бенчмарка на 15 000 устройств
 python benchmark.py --total 15000 --concurrent 1000
+
+# 3. Запуск шаблонов команд из текстового файла (см. ниже)
+LOGNAME=admin python3 fire.py --dry-run jobs-cisco.txt cisco
 ```
 *   Панель API: `http://localhost:8000`
 *   Панель Grafana: `http://localhost:3000` (admin/admin)
