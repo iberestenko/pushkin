@@ -60,7 +60,23 @@ DEFAULT_TEMPLATES = {
         ]
     },
     "eltex": {
+        "config_mode": [
+            "configure terminal"
+        ],
+        "create_vlan": [
+            "vlan database",
+            "vlan {{ vlan_id }}",
+            "exit",
+            "interface vlan {{ vlan_id }}",
+            "name {{ vlan_name }}",
+            "exit",
+        ],
+        "save_config": [
+            "end",
+            "write memory"
+        ],
         "set_snmp": [
+            "snmp-server server",
             "snmp-server community {{ community }} {{ mode|upper|default('RO') }}",
             "exit"
         ]
