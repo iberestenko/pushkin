@@ -29,7 +29,7 @@ DEFAULT_TEMPLATES = {
             "description PUSHKIN_PROVISIONED_{{ vlan_name }}"
         ],
         "set_snmp": [
-            "snmp-server community {{ community }} {{ mode|default('RO') }}",
+            "snmp-server community {{ community }} {{ mode|default('RO')|upper }}",
             "snmp-server contact Network_Team",
             "exit"
         ]
@@ -54,7 +54,7 @@ DEFAULT_TEMPLATES = {
             "port default vlan {{ vlan_id }}"
         ],
         "set_snmp": [
-            "snmp-agent community {{ 'read' if mode == 'ro' else 'write' }} {{ community }}"
+            "snmp-agent community {{ 'write' if mode|lower == 'rw' else 'read' }} {{ community }}"
             "snmp-agent sys-info version all",
             "exit"
         ]
@@ -77,7 +77,7 @@ DEFAULT_TEMPLATES = {
         ],
         "set_snmp": [
             "snmp-server server",
-            "snmp-server community {{ community }} {{ mode|upper|default('RO') }}",
+            "snmp-server community {{ community }} {{ mode|default('RO')|upper }}",
             "exit"
         ]
     },
