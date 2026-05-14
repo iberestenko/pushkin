@@ -32,20 +32,25 @@ class PushkinAsyncEngine:
         
         if self.redis: await self.redis.set("pushkin:metrics:conn_errors", 0)
         async with self.semaphore:
-            if self.redis:
-                await self.redis.incr("pushkin:metrics:active_sessions")
+            if self.redis: await self.redis.incr("pushkin:metrics:active_sessions")
             start_time = time.time()
             full_log = []
             failed_command = None
             error_detected = False
+            conn_timeout = 15.0
             
             try:
                 # 1. Подключение
-                async with asyncssh.connect(
-                    host, port=port, username=user, password=password, 
-                    known_hosts=None, login_timeout=15, 
-                    client_version='SSH-2.0-PushkinEngine',
-                ) as conn:
+                conn = await asyncio.wait_for(
+                    asyncssh.connect(
+                        host, port=port, username=user, password=password, 
+                        known_hosts=None,
+                        client_version='SSH-2.0-PushkinEngine',
+                    ),
+                    timeout=conn_timeout
+                )
+
+                async with conn:
                     
                     writer, reader, _ = await conn.open_session()
                     
@@ -128,14 +133,19 @@ class PushkinAsyncEngine:
                     "time": execution_time
                 }
 
-            except Exception as e:
-                err_msg = f"\n[!] CONNECTION ERROR: {str(e)}\n"
+            except (asyncio.TimeoutError, Exception) as e:
+                if isinstance(e, asyncio.TimeoutError):
+                    err_msg = f"\n[!] CONNECTION ERROR: Connection timed out after {conn_timeout} seconds\n"
+                    error_text = "TimeoutError"
+                else:
+                    err_msg = f"\n[!] CONNECTION ERROR: {str(e)}\n"
+                    error_text = str(e)
                 if self.redis: await self.redis.publish(channel_name, err_msg)
                 if self.redis: await self.redis.incr("pushkin:metrics:conn_errors")
                 return {
                     "id": device_id,
                     "status": f"connection_error: {err_msg}",
-                    "error": str(e),
+                    "error": error_text,
                     "log": None
                 }
             finally:
