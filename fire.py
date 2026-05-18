@@ -14,7 +14,7 @@ PASS = getpass.getpass("Enter your password:")
 MAX_CONCURRENT = 50 
 
 
-def parse_jobs(file_path, vendor):
+def parse_jobs(file_path, vendor, proto):
     """Парсит файл и группирует команды по хостам."""
     device_commands = {}
     current_host = current_port = device_id = None
@@ -32,7 +32,8 @@ def parse_jobs(file_path, vendor):
                         device = device.strip()
                         parts = device.split(':', 1)
                         current_host = parts[0]
-                        current_port = parts[1] if len(parts) > 1 else '22'
+                        default_port = '23' if proto == 'telnet' else '22'
+                        current_port = parts[1] if len(parts) > 1 else default_port
                         device_id = f"{current_host}:{current_port}"
                         if device_id not in device_commands:
                             device_commands[device_id] = commands_list  # один список на каждый набор хостов
@@ -58,13 +59,16 @@ def parse_jobs(file_path, vendor):
         return []
 
     return [
-        {"ip": device_id.split(':', 1)[0], "port": device_id.split(':', 1)[1], "user": USER, "pw": PASS, "cmds": cmds}
+        {
+            "ip": device_id.split(':', 1)[0], "port": device_id.split(':', 1)[1], 
+            "user": USER, "pw": PASS, "cmds": cmds, "proto": proto,
+         }
         for device_id, cmds in device_commands.items() if cmds
     ]
 
-async def fire(file_path, vendor, dry_run=False):
+async def fire(file_path, vendor, dry_run=False, proto="ssh"):
     print(f"📖 Reading jobs from: {file_path} (Vendor: {vendor})")
-    tasks = parse_jobs(file_path, vendor)
+    tasks = parse_jobs(file_path, vendor, proto)
     
     if not tasks:
         return
@@ -103,11 +107,12 @@ if __name__ == "__main__":
     parser.add_argument("commands_file", help="Path to the jobs.txt file")
     parser.add_argument("vendor", help="Vendor name (cisco, huawei, eltex, mikrotik, ...)")
     parser.add_argument("--dry-run", action="store_true", help="Show commands without sending them")
-    
+    parser.add_argument("--proto", default="ssh", choices=["ssh", "telnet"],
+                    help="Communication protocol (default: ssh)")
     args = parser.parse_args()
 
     try:
         print(f"🎸 Логин будет от имени {USER}")
-        asyncio.run(fire(args.commands_file, args.vendor, args.dry_run))
+        asyncio.run(fire(args.commands_file, args.vendor, args.dry_run, args.proto))
     except KeyboardInterrupt:
         print("\n[!] Stopped by user.")

@@ -1,0 +1,13 @@
+127.0.0.1:2233, 127.0.0.1:2234, 127.0.0.1:2235, 127.0.0.1:2236, 127.0.0.1:2237, 127.0.0.1:2238, 127.0.0.1:2239, 127.0.0.1:2240, 127.0.0.1:2241
+
+create vlan: vlan_id=150 vlan_name="TELNET VLAN 150"
+
+
+127.0.0.1:23
+
+create vlan: vlan_id=100 vlan_name="TELNET VLAN 100"
+
+
+127.0.0.1:22
+
+create vlan: vlan_id=200 vlan_name="SSH VLAN 200"
