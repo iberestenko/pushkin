@@ -8,3 +8,5 @@ auth_keys/
 .DS_Store
 .swp
 .vscode/
+cytoscape.min
+preview.html
