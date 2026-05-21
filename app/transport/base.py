@@ -44,6 +44,7 @@ class BaseTransport(ABC):
         # Новый параметр конфигурации: "burst" или "step" (по умолчанию "step")
         mode      = device_cfg.get("mode", "step") 
         
+        # TODO: make arguments for fire.py
         connect_params = {
             "login_timeout": device_cfg.get("login_timeout", 1.5),
             "pass_timeout":  device_cfg.get("pass_timeout", 0.7),
@@ -76,13 +77,17 @@ class BaseTransport(ABC):
                 # РЕЖИМ 1: COMMAND BURST (Быстрая отправка) / FAST (отправка без ответа)
                 # ======================================================================
                 if mode == "burst" or mode == "fast":
-                    await pub(f"\n[Pushkin] Running in BURST/FAST mode (Fast sending, no rollback/No output)...\n")
-                    
+                    if mode == "burst":
+                        await pub(f"\n[Pushkin] Running in BURST mode (Fast sending, no rollback...\n")
+                    else:
+                        await pub(f"\n[Pushkin] Running in FAST mode (No output)...\n")
+
                     send_start = time.time()
                     
                     chunk_size  = device_cfg.get("chunk_size", 0)
                     chunk_delay = device_cfg.get("chunk_delay", 0.05)  # 50 мс по умолчанию
 
+                    # TODO: make arguments for fire.py
                     if chunk_size > 0 and len(commands) > chunk_size:
                         # Опция включена: нарезаем пачку на куски
                         await pub(f"[Pushkin] Chunking enabled: sending by {chunk_size} commands with {chunk_delay}s delay\n")
