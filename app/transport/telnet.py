@@ -6,14 +6,23 @@ from app.transport.base import BaseTransport
 class TelnetTransport(BaseTransport):
     async def connect(self, host, port, user, password, 
                       login_timeout, pass_timeout, blind_login, **kwargs):
-        reader, writer = await asyncio.wait_for(
-            telnetlib3.open_connection(host, port, encoding="utf-8"),
-            timeout=15,
-        )
-        if blind_login:
-            await self._blind_login(reader, writer, user, password, login_timeout, pass_timeout)
-        else:
-            await self._login(reader, writer, user, password)
+        try:
+            reader, writer = await asyncio.wait_for(
+                telnetlib3.open_connection(host, port, encoding="utf-8"),
+                timeout=15,
+            )
+        except asyncio.TimeoutError:
+            raise ConnectionError(f"Telnet connection timed out to {host}:{port} (15s exceeded)")
+        except (OSError, ConnectionError) as e:
+            raise ConnectionError(f"Failed to establish network connection to {host}:{port}: {e}")
+        try:
+            if blind_login:
+                await self._blind_login(reader, writer, user, password, login_timeout, pass_timeout)
+            else:
+                await self._login(reader, writer, user, password)
+        except Exception as e:
+            writer.close()  # Гарантированно закрываем сокет при провале логина
+            raise ConnectionError(f"Telnet authentication failed: {e}")
         return reader, writer
 
     async def _blind_login(self, reader, writer, user, password, login_timeout, pass_timeout):
@@ -29,9 +38,9 @@ class TelnetTransport(BaseTransport):
             try:
                 chunk = await asyncio.wait_for(reader.read(4096), timeout=2.0)
             except asyncio.TimeoutError:
-                break
+                raise TimeoutError("Timeout waiting for login prompt")
             if not chunk: 
-                break
+                raise ConnectionResetError("Device closed connection during login")
             buf += chunk
             low_buf = buf.lower()
             if "username:" in low_buf or "login:" in low_buf:
@@ -41,7 +50,8 @@ class TelnetTransport(BaseTransport):
                 writer.write(password + "\r\n")
                 buf = ""
             elif "#" in buf or ">" in buf:
-                break
-
+                return
+        raise TimeoutError("Login deadline exceeded without finding prompt")
+    
     def make_payload(self, commands):
         return "\r\n".join(commands) + "\r\n"

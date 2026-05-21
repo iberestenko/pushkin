@@ -14,7 +14,7 @@ PASS = getpass.getpass("Enter your password:")
 MAX_CONCURRENT = 50 
 
 
-def parse_jobs(file_path, vendor, proto):
+def parse_jobs(file_path, vendor, proto, mode):
     """Парсит файл и группирует команды по хостам."""
     device_commands = {}
     current_host = current_port = device_id = None
@@ -61,14 +61,14 @@ def parse_jobs(file_path, vendor, proto):
     return [
         {
             "ip": device_id.split(':', 1)[0], "port": device_id.split(':', 1)[1], 
-            "user": USER, "pw": PASS, "cmds": cmds, "proto": proto,
+            "user": USER, "pw": PASS, "cmds": cmds, "proto": proto, "mode": mode,
          }
         for device_id, cmds in device_commands.items() if cmds
     ]
 
-async def fire(file_path, vendor, dry_run=False, proto="ssh"):
+async def fire(file_path, vendor, dry_run=False, proto="ssh", mode="step"):
     print(f"📖 Reading jobs from: {file_path} (Vendor: {vendor})")
-    tasks = parse_jobs(file_path, vendor, proto)
+    tasks = parse_jobs(file_path, vendor, proto, mode)
     
     if not tasks:
         return
@@ -88,9 +88,9 @@ async def fire(file_path, vendor, dry_run=False, proto="ssh"):
 
         print(f"\n🚀 FIRE FINISHED in {duration:.2f}s")
         
-        success_count = sum(1 for res in results if res['status'] == "success")
+        success_count = sum(1 for res in results if res['status'] == "success" or res['status'] == "fast_fired")
         for res in results:
-            status = "✅" if res['status'] == "success" else "❌"
+            status = "✅" if res['status'] == "success" or res['status'] == "fast_fired" else "❌"
             print(f"{status} {res['id']} - {res['status']}")
 
         print("\n📝 Logs:")
@@ -109,10 +109,12 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true", help="Show commands without sending them")
     parser.add_argument("--proto", default="ssh", choices=["ssh", "telnet"],
                     help="Communication protocol (default: ssh)")
+    parser.add_argument("--mode", default="step", choices=["step", "burst", "fast"],
+                    help="Operation mode (Step-By-Step, Command Burst, or Fast (No output), default: step)")
     args = parser.parse_args()
 
     try:
         print(f"🎸 Логин будет от имени {USER}")
-        asyncio.run(fire(args.commands_file, args.vendor, args.dry_run, args.proto))
+        asyncio.run(fire(args.commands_file, args.vendor, args.dry_run, args.proto, args.mode))
     except KeyboardInterrupt:
         print("\n[!] Stopped by user.")
