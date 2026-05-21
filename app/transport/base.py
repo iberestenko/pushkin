@@ -80,8 +80,25 @@ class BaseTransport(ABC):
                     
                     send_start = time.time()
                     
-                    writer.write(self.make_payload(commands))
-                    await writer.drain()
+                    chunk_size  = device_cfg.get("chunk_size", 0)
+                    chunk_delay = device_cfg.get("chunk_delay", 0.05)  # 50 мс по умолчанию
+
+                    if chunk_size > 0 and len(commands) > chunk_size:
+                        # Опция включена: нарезаем пачку на куски
+                        await pub(f"[Pushkin] Chunking enabled: sending by {chunk_size} commands with {chunk_delay}s delay\n")
+                        
+                        for i in range(0, len(commands), chunk_size):
+                            current_chunk = commands[i : i + chunk_size]
+                            writer.write(self.make_payload(current_chunk))
+                            await writer.drain()
+                            
+                            # Делаем паузу между кусками, кроме самого последнего
+                            if i + chunk_size < len(commands):
+                                await asyncio.sleep(chunk_delay)
+                    else:
+                        # Опция отключена: шлем всё одним махом
+                        writer.write(self.make_payload(commands))
+                        await writer.drain()
 
                     send_time = round((time.time() - send_start) * 1000, 3) # в миллисекундах
                     await pub(f"\n[Pushkin] Pure send time: {send_time} ms\n")
