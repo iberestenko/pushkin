@@ -16,8 +16,9 @@ class PushkinAsyncEngine:
 
     async def run_mass_config(self, device_list, job_id):
         tasks = [self.run_pushkin_task(d, job_id) for d in device_list]
-        # return await asyncio.gather(*tasks)
-        results = []
-        for task in tasks:
-            results.append(await task)
-        return results
+        return await asyncio.gather(*tasks)
+        # for debugging:
+        # results = []
+        # for task in tasks:
+        #     results.append(await task)
+        # return results
