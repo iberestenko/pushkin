@@ -79,5 +79,12 @@ services:
     ports:
       - "2233-2243:23"
 
+  mock_telnet2:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock.telnet2
+    ports:
+      - "2244-2254:23"
+
 volumes:
   grafana_data: # Объявляем именованный том

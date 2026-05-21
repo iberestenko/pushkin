@@ -1,0 +1,9 @@
+FROM alpine
+RUN apk add --no-cache busybox-extras shadow
+
+# Создаем тестового пользователя admin с паролем cisco
+RUN useradd -m -s /bin/sh admin && echo "admin:cisco" | chpasswd
+
+EXPOSE 23
+# Запускаем telnetd с полноценным системным login
+CMD ["telnetd", "-F", "-l", "/bin/login"]

@@ -36,21 +36,26 @@ class TelnetTransport(BaseTransport):
         deadline = asyncio.get_event_loop().time() + 15
         while asyncio.get_event_loop().time() < deadline:
             try:
-                chunk = await asyncio.wait_for(reader.read(4096), timeout=2.0)
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=10.0)
             except asyncio.TimeoutError:
                 raise TimeoutError("Timeout waiting for login prompt")
             if not chunk: 
                 raise ConnectionResetError("Device closed connection during login")
             buf += chunk
             low_buf = buf.lower()
+
+            if "incorrect" in low_buf or "bad" in low_buf:
+                raise Exception("Incorrect credentials")
+            elif "#" in buf or ">" in buf or "$" in buf:
+                return
+
             if "username:" in low_buf or "login:" in low_buf:
                 writer.write(user + "\r\n")
                 buf = ""
             elif "password:" in low_buf:
                 writer.write(password + "\r\n")
                 buf = ""
-            elif "#" in buf or ">" in buf:
-                return
+            
         raise TimeoutError("Login deadline exceeded without finding prompt")
     
     def make_payload(self, commands):
