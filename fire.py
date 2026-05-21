@@ -3,7 +3,6 @@ import re
 import shlex
 import time
 import getpass
-import os
 import argparse  # Добавили для обработки аргументов
 from app.brains import render_pushkin_template
 from app.worker import PushkinAsyncEngine
@@ -12,7 +11,7 @@ from app.worker import PushkinAsyncEngine
 USER = getpass.getuser()
 PASS = getpass.getpass("Enter your password:")
 MAX_CONCURRENT = 50 
-
+ANSI_ESCAPE = re.compile(r'\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
 def parse_jobs(file_path, vendor, proto, mode):
     """Парсит файл и группирует команды по хостам."""
@@ -95,7 +94,8 @@ async def fire(file_path, vendor, dry_run=False, proto="ssh", mode="step"):
 
         print("\n📝 Logs:")
         for res in results:
-            print(f"Log of {res['id']}:\n{res['log']}")
+            clean_log = ANSI_ESCAPE.sub('', res['log']) if res['log'] else ""
+            print(f"Log of {res['id']}:\n{clean_log}")
 
         print(f"\nTotal: {len(tasks)} | Success: {success_count} | Failed: {len(tasks)-success_count}")
 
