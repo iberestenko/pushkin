@@ -21,18 +21,41 @@ class BaseTransport(ABC):
         """SSH шлёт '\n', Telnet '\r\n'."""
         ...
 
-    async def _wait_for_prompt(self, reader, full_log, timeout=5.0):
-        """Служебный метод ожидания приглашения командной строки (Prompt)."""
+    async def _wait_for_prompt(self, reader, full_log, timeout=5.0, expected_cmd=None):
+        """Реактивное ожидание prompt с защитой от Race Condition через подсчет."""
         try:
             while True:
                 chunk = await asyncio.wait_for(reader.read(4096), timeout=timeout)
                 if not chunk:
                     break
                 full_log.append(chunk)
-                if any(p in chunk for p in (">", "#")):
+
+                current_output = "".join(full_log)
+
+                # 1. Если это выполнение команды, проверяем эхо
+                if expected_cmd and expected_cmd not in current_output:
+                    continue
+
+                # 2. Берем последнюю непустую строку
+                lines = [line.strip() for line in current_output.splitlines() if line.strip()]
+                if not lines:
+                    continue
+                last_line = lines[-1]
+
+                # 3. Ищем prompt в последней строке (возвращаем скорость)
+                found_prompt = next((p for p in (">", "#", "$") if p in last_line), None)
+                
+                if found_prompt:
+                    # КРИТИЧЕСКИЙ ФИКС: если мы выполняем команду (expected_cmd задан),
+                    # в логе должно быть как минимум ДВА символа промпта: 
+                    # один старый (до команды) и один новый (после команды).
+                    if expected_cmd and current_output.count(found_prompt) < 2:
+                        continue # Ошибка/новый промпт еще не долетели по сети, читаем дальше!
+                        
                     break
         except asyncio.TimeoutError:
             pass
+
 
     async def run_task(self, device_cfg, job_id, semaphore, redis=None, quiet_period=2.0):
         host      = device_cfg["ip"]
@@ -72,7 +95,7 @@ class BaseTransport(ABC):
 
             try:
                 reader, writer = await self.connect(host, port, user, password, **connect_params)
-
+                # TODO: rename slow, fast, ultra
                 # ======================================================================
                 # РЕЖИМ 1: COMMAND BURST (Быстрая отправка) / FAST (отправка без ответа)
                 # ======================================================================
@@ -146,7 +169,7 @@ class BaseTransport(ABC):
                         await writer.drain()
 
                         cmd_buffer_list = []
-                        await self._wait_for_prompt(reader, cmd_buffer_list, timeout=quiet_period)
+                        await self._wait_for_prompt(reader, cmd_buffer_list, timeout=quiet_period, expected_cmd=cmd)
                         
                         # Переносим прочитанное в общий лог и склеиваем для проверки на стоп-слова
                         cmd_buffer = "".join(cmd_buffer_list)
@@ -177,7 +200,7 @@ class BaseTransport(ABC):
                             await writer.drain()
                             
                             # Ждем prompt для текущей команды отката
-                            await self._wait_for_prompt(reader, full_log, timeout=1.0)
+                            await self._wait_for_prompt(reader, full_log, timeout=1.0, expected_cmd=rollback_cmd)
                     except asyncio.TimeoutError:
                         await pub("\n[!] Rollback finished (silence timeout).\n")
                     except Exception as e:
